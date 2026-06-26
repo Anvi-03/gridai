@@ -1,0 +1,2 @@
+# This directory holds auto-generated Alembic migration scripts.
+# Run `alembic revision --autogenerate -m "initial"` to create the first migration.

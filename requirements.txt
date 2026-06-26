@@ -1,0 +1,32 @@
+# GridPulse AI — Python dependencies
+# Pin major versions; bump deliberately during upgrades.
+
+# ── Web framework ──────────────────────────────────────────────────────────────
+fastapi==0.115.5
+uvicorn[standard]==0.32.1          # ASGI server with websocket + http/2 support
+
+# ── Database ───────────────────────────────────────────────────────────────────
+sqlalchemy[asyncio]==2.0.36        # async ORM / core
+asyncpg==0.30.0                    # async PostgreSQL driver (used by SQLAlchemy)
+alembic==1.14.0                    # schema migrations
+
+# ── Validation & Settings ──────────────────────────────────────────────────────
+pydantic==2.10.3
+pydantic-settings==2.6.1           # BaseSettings with .env support
+
+# ── ML & Numerics (Feature 2 — Dual-Layer ML Engine) ────────────────────────
+scikit-learn==1.5.2                # IsolationForest anomaly detector
+numpy==1.26.4                      # array ops (required by scikit-learn)
+# torch>=2.3.0                     # Optional: enable for LSTM forecaster
+#                                  # Set ENABLE_LSTM=true + LSTM_WEIGHTS_PATH in .env
+
+# ── HTTP client (simulator) ────────────────────────────────────────────────────
+httpx==0.28.0                      # async HTTP/1.1 + HTTP/2 client
+
+# ── Dev / Testing ──────────────────────────────────────────────────────────────
+pytest==8.3.4
+pytest-asyncio==0.24.0
+httpx                              # already listed above, also used in test client
+
+# ── GenAI Copilot (Feature 4) ─────────────────────────────────────────────────
+google-genai>=2.10.0               # Google Gemini API SDK (async client)
