@@ -21,7 +21,7 @@ import { clsx } from 'clsx'
 import type { StatsRow, TelemetryReading, ForecastReport, HealthResponse } from './types/grid'
 import { fetchStats, fetchTelemetry, fetchForecast, fetchHealth } from './lib/api'
 import { MetricCards }      from './components/MetricCards'
-import { DigitalTwinGrid }  from './components/DigitalTwinGrid'
+import { DigitalTwinTopology } from './components/DigitalTwinTopology'
 import { ForecastChart }    from './components/ForecastChart'
 import { GridCopilot }      from './components/GridCopilot'
 
@@ -230,7 +230,7 @@ export default function App() {
               </div>
             </div>
 
-            <DigitalTwinGrid
+            <DigitalTwinTopology
               stats={stats}
               telemetry={telemetry}
               forecastItems={forecastMatrix}

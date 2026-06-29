@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     # Gemini API key — obtain from https://aistudio.google.com/app/apikey
     GEMINI_API_KEY: str = ""
     # Model name — see https://ai.google.dev/models/gemini for options
-    GEMINI_MODEL:   str = "gemini-2.0-flash"
+    GEMINI_MODEL:   str = "gemini-2.5-flash"
 
     # ── Ingestion / Batching ──────────────────────────────────────────────────
     # Maximum records accepted in a single POST body.
