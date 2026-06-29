@@ -9,9 +9,7 @@
  *   2. Intermediate Nodes: Transformer Alpha & Transformer Beta
  *   3. Leaf Nodes: Smart meters from active stats array
  *
- * Edge path animation triggers dynamically when a leaf node detects an anomaly:
- *   - The edge turns red and runs a laser pulse animation.
- *   - The meter node turns into a red glassmorphism warning state with flashing alerts.
+ * Support simulation overrides to test layout resilience under simulated scenarios.
  */
 
 import { useState, useMemo } from 'react'
@@ -25,7 +23,7 @@ import {
   Activity,
 } from 'lucide-react'
 import { clsx } from 'clsx'
-import type { TelemetryReading, StatsRow, MeterForecastItem, MeterNode } from '../types/grid'
+import type { TelemetryReading, StatsRow, MeterForecastItem, MeterNode, SimulationResponse } from '../types/grid'
 import { formatINR, formatWatts, riskColor } from '../lib/api'
 
 interface DigitalTwinTopologyProps {
@@ -33,6 +31,7 @@ interface DigitalTwinTopologyProps {
   telemetry: TelemetryReading[]
   forecastItems: MeterForecastItem[]
   onSelectNode?: (nodeId: string) => void
+  simulationOverride?: SimulationResponse | null
 }
 
 // ── Merge stats, telemetry, and forecast data ───────────────────────────────
@@ -158,19 +157,19 @@ function MeterDrawer({ node, onClose }: DrawerProps) {
                   label: 'Voltage',
                   value: `${(node.latest_voltage ?? node.avg_voltage).toFixed(1)} V`,
                   sub: `Avg ${node.avg_voltage.toFixed(1)} V`,
-                  ok: Math.abs((node.latest_voltage ?? node.avg_voltage) - 230) < 10,
+                  ok: Math.abs((node.latest_voltage ?? node.avg_voltage) - 230) < 15,
                 },
                 {
                   label: 'Current',
                   value: `${(node.latest_current ?? node.avg_current).toFixed(1)} A`,
                   sub: `Avg ${node.avg_current.toFixed(1)} A`,
-                  ok: (node.latest_current ?? node.avg_current) < 40,
+                  ok: (node.latest_current ?? node.avg_current) < 60,
                 },
                 {
                   label: 'Power Factor',
                   value: node.avg_power_factor.toFixed(3),
-                  sub: node.avg_power_factor >= 0.8 ? 'Healthy' : 'Below threshold',
-                  ok: node.avg_power_factor >= 0.8,
+                  sub: node.avg_power_factor >= 0.75 ? 'Healthy' : 'Below threshold',
+                  ok: node.avg_power_factor >= 0.75,
                 },
                 {
                   label: 'Real Power',
@@ -291,6 +290,7 @@ export function DigitalTwinTopology({
   telemetry,
   forecastItems,
   onSelectNode,
+  simulationOverride,
 }: DigitalTwinTopologyProps) {
   const [selectedMeter, setSelectedMeter] = useState<MeterNode | null>(null)
 
@@ -371,18 +371,27 @@ export function DigitalTwinTopology({
     })
 
     // Substation to Transformer Edges
+    const animateSubAlpha = simulationOverride?.target_transformer_id === 'transformer-alpha'
+    const animateSubBeta  = simulationOverride?.target_transformer_id === 'transformer-beta'
+
     edges.push({
       id: 'e-sub-alpha',
       source: 'substation',
       target: 'transformer-alpha',
-      style: { stroke: '#334155', strokeWidth: 2 },
+      animated: animateSubAlpha,
+      style: animateSubAlpha
+        ? { stroke: '#ef4444', strokeWidth: 3 }
+        : { stroke: '#334155', strokeWidth: 2 },
     })
 
     edges.push({
       id: 'e-sub-beta',
       source: 'substation',
       target: 'transformer-beta',
-      style: { stroke: '#334155', strokeWidth: 2 },
+      animated: animateSubBeta,
+      style: animateSubBeta
+        ? { stroke: '#ef4444', strokeWidth: 3 }
+        : { stroke: '#334155', strokeWidth: 2 },
     })
 
     // 3. Leaf Level: Smart Meters
@@ -393,7 +402,25 @@ export function DigitalTwinTopology({
     const alphaWidth = 360
     const alphaStep = alphaMeters.length > 1 ? alphaWidth / (alphaMeters.length - 1) : alphaWidth
     alphaMeters.forEach((node, idx) => {
-      const isCritical = node.is_anomalous || node.edge_flagged
+      const isMeterAffected = simulationOverride?.affected_meter_ids.includes(node.meter_id) ?? false
+      const isCritical = simulationOverride 
+        ? isMeterAffected 
+        : (node.is_anomalous || node.edge_flagged)
+
+      const displayVoltage = isMeterAffected && simulationOverride
+        ? simulationOverride.simulated_telemetry.voltage
+        : (node.latest_voltage ?? node.avg_voltage)
+
+      const displayRisk = isMeterAffected && simulationOverride
+        ? simulationOverride.failure_probability
+        : node.outage_risk_score
+
+      const displayRiskZone = isMeterAffected && simulationOverride
+        ? (simulationOverride.failure_probability >= 70 ? 'critical'
+           : simulationOverride.failure_probability >= 50 ? 'high'
+           : simulationOverride.failure_probability >= 30 ? 'medium' : 'low')
+        : node.risk_zone
+
       const x = 20 + idx * alphaStep
       const y = 300 + (idx % 2) * 50 // subtle staggering prevents overlap
 
@@ -412,35 +439,33 @@ export function DigitalTwinTopology({
             )}>
               {isCritical && (
                 <span className="absolute -top-3 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full bg-red-500 text-white text-[9px] font-bold tracking-wider uppercase animate-blink whitespace-nowrap shadow-lg">
-                  {node.edge_flagged ? "⚡ Edge Flagged" : "❌ Theft Alert"}
+                  {simulationOverride ? "⚡ Active Scenario" : (node.edge_flagged ? "⚡ Edge Flagged" : "❌ Theft Alert")}
                 </span>
               )}
               <div className="flex items-center justify-between mb-1.5 font-mono">
                 <span className="text-[10px] text-slate-400 font-semibold">{node.meter_id}</span>
                 <span className={clsx("w-1.5 h-1.5 rounded-full",
-                  node.is_anomalous
+                  isCritical || displayRiskZone === 'critical'
                     ? "bg-red-500 animate-blink"
-                    : node.risk_zone === 'critical'
-                    ? "bg-red-500 animate-blink"
-                    : node.risk_zone === 'high'
+                    : displayRiskZone === 'high'
                     ? "bg-orange-500"
-                    : node.risk_zone === 'medium'
+                    : displayRiskZone === 'medium'
                     ? "bg-amber-400"
                     : "bg-emerald-400"
                 )} />
               </div>
               <div className="text-base font-bold font-mono text-slate-100">
-                {(node.latest_voltage ?? node.avg_voltage).toFixed(0)}
+                {displayVoltage.toFixed(0)}
                 <span className="text-slate-500 text-xs font-normal ml-0.5">V</span>
               </div>
               <div className="flex items-center justify-between mt-2 pt-1 border-t border-slate-800 text-[10px]">
                 <span className="text-slate-500">Risk Score</span>
                 <span className={clsx("font-semibold font-mono",
-                  node.risk_zone === 'critical' ? "text-red-400"
-                  : node.risk_zone === 'high' ? "text-orange-400"
-                  : node.risk_zone === 'medium' ? "text-amber-400"
+                  displayRiskZone === 'critical' ? "text-red-400"
+                  : displayRiskZone === 'high' ? "text-orange-400"
+                  : displayRiskZone === 'medium' ? "text-amber-400"
                   : "text-emerald-400"
-                )}>{node.outage_risk_score}</span>
+                )}>{displayRisk}</span>
               </div>
             </div>
           )
@@ -462,7 +487,25 @@ export function DigitalTwinTopology({
     const betaWidth = 360
     const betaStep = betaMeters.length > 1 ? betaWidth / (betaMeters.length - 1) : betaWidth
     betaMeters.forEach((node, idx) => {
-      const isCritical = node.is_anomalous || node.edge_flagged
+      const isMeterAffected = simulationOverride?.affected_meter_ids.includes(node.meter_id) ?? false
+      const isCritical = simulationOverride 
+        ? isMeterAffected 
+        : (node.is_anomalous || node.edge_flagged)
+
+      const displayVoltage = isMeterAffected && simulationOverride
+        ? simulationOverride.simulated_telemetry.voltage
+        : (node.latest_voltage ?? node.avg_voltage)
+
+      const displayRisk = isMeterAffected && simulationOverride
+        ? simulationOverride.failure_probability
+        : node.outage_risk_score
+
+      const displayRiskZone = isMeterAffected && simulationOverride
+        ? (simulationOverride.failure_probability >= 70 ? 'critical'
+           : simulationOverride.failure_probability >= 50 ? 'high'
+           : simulationOverride.failure_probability >= 30 ? 'medium' : 'low')
+        : node.risk_zone
+
       const x = 460 + idx * betaStep
       const y = 300 + (idx % 2) * 50
 
@@ -481,35 +524,33 @@ export function DigitalTwinTopology({
             )}>
               {isCritical && (
                 <span className="absolute -top-3 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full bg-red-500 text-white text-[9px] font-bold tracking-wider uppercase animate-blink whitespace-nowrap shadow-lg">
-                  {node.edge_flagged ? "⚡ Edge Flagged" : "❌ Theft Alert"}
+                  {simulationOverride ? "⚡ Active Scenario" : (node.edge_flagged ? "⚡ Edge Flagged" : "❌ Theft Alert")}
                 </span>
               )}
               <div className="flex items-center justify-between mb-1.5 font-mono">
                 <span className="text-[10px] text-slate-400 font-semibold">{node.meter_id}</span>
                 <span className={clsx("w-1.5 h-1.5 rounded-full",
-                  node.is_anomalous
+                  isCritical || displayRiskZone === 'critical'
                     ? "bg-red-500 animate-blink"
-                    : node.risk_zone === 'critical'
-                    ? "bg-red-500 animate-blink"
-                    : node.risk_zone === 'high'
+                    : displayRiskZone === 'high'
                     ? "bg-orange-500"
-                    : node.risk_zone === 'medium'
+                    : displayRiskZone === 'medium'
                     ? "bg-amber-400"
                     : "bg-emerald-400"
                 )} />
               </div>
               <div className="text-base font-bold font-mono text-slate-100">
-                {(node.latest_voltage ?? node.avg_voltage).toFixed(0)}
+                {displayVoltage.toFixed(0)}
                 <span className="text-slate-500 text-xs font-normal ml-0.5">V</span>
               </div>
               <div className="flex items-center justify-between mt-2 pt-1 border-t border-slate-800 text-[10px]">
                 <span className="text-slate-500">Risk Score</span>
                 <span className={clsx("font-semibold font-mono",
-                  node.risk_zone === 'critical' ? "text-red-400"
-                  : node.risk_zone === 'high' ? "text-orange-400"
-                  : node.risk_zone === 'medium' ? "text-amber-400"
+                  displayRiskZone === 'critical' ? "text-red-400"
+                  : displayRiskZone === 'high' ? "text-orange-400"
+                  : displayRiskZone === 'medium' ? "text-amber-400"
                   : "text-emerald-400"
-                )}>{node.outage_risk_score}</span>
+                )}>{displayRisk}</span>
               </div>
             </div>
           )
@@ -528,7 +569,7 @@ export function DigitalTwinTopology({
     })
 
     return { flowNodes: nodes, flowEdges: edges }
-  }, [meterNodesData])
+  }, [meterNodesData, simulationOverride])
 
   // ── Node click interaction handler ──────────────────────────────────────────
   const handleNodeClick = (_event: React.MouseEvent, node: any) => {
@@ -538,7 +579,24 @@ export function DigitalTwinTopology({
 
     const clickedMeter = meterNodesData.find(m => m.meter_id === node.id)
     if (clickedMeter) {
-      setSelectedMeter(clickedMeter)
+      const isMeterAffected = simulationOverride?.affected_meter_ids.includes(clickedMeter.meter_id) ?? false
+      if (isMeterAffected && simulationOverride) {
+        setSelectedMeter({
+          ...clickedMeter,
+          latest_voltage: simulationOverride.simulated_telemetry.voltage,
+          latest_current: simulationOverride.simulated_telemetry.current,
+          avg_power_factor: simulationOverride.simulated_telemetry.power_factor,
+          outage_risk_score: simulationOverride.failure_probability,
+          risk_zone: (simulationOverride.failure_probability >= 70 ? 'critical'
+                      : simulationOverride.failure_probability >= 50 ? 'high'
+                      : simulationOverride.failure_probability >= 30 ? 'medium' : 'low'),
+          is_anomalous: true,
+          anomaly_type: simulationOverride.scenario,
+          revenue_loss_inr: 0,
+        })
+      } else {
+        setSelectedMeter(clickedMeter)
+      }
     }
   }
 

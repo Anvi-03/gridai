@@ -129,3 +129,16 @@ export interface ChartPoint {
   forecast: number | null;
   risk: number | null;
 }
+
+// ── Scenario Simulation (POST /api/v1/simulation/trigger) ─────────────────────
+
+export interface SimulationResponse {
+  scenario: string;
+  target_transformer_id: string;
+  affected_meter_ids: string[];
+  simulated_telemetry: Record<string, number>;
+  failure_probability: number;
+  estimated_loss_text: string;
+  copilot_analysis: string;
+}
+

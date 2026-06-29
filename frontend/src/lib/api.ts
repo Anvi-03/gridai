@@ -14,6 +14,7 @@ import type {
   ForecastReport,
   CopilotResponse,
   HealthResponse,
+  SimulationResponse,
 } from '../types/grid'
 
 // ── Base fetch helper ─────────────────────────────────────────────────────────
@@ -150,6 +151,19 @@ export async function postCopilotQuery(
   return apiFetch<CopilotResponse>('/api/v1/copilot/query', {
     method: 'POST',
     body: JSON.stringify({ message }),
+  })
+}
+
+/**
+ * Trigger scenario simulation.
+ * POST /api/v1/simulation/trigger  { scenario: string }
+ */
+export async function postTriggerSimulation(
+  scenario: string,
+): Promise<SimulationResponse | null> {
+  return apiFetch<SimulationResponse>('/api/v1/simulation/trigger', {
+    method: 'POST',
+    body: JSON.stringify({ scenario }),
   })
 }
 

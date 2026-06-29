@@ -15,15 +15,16 @@
  *   - Connection status banner shows LIVE / DEGRADED / OFFLINE.
  */
 
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { Activity, RefreshCw, Wifi, WifiOff, Zap } from 'lucide-react'
 import { clsx } from 'clsx'
-import type { StatsRow, TelemetryReading, ForecastReport, HealthResponse } from './types/grid'
+import type { StatsRow, TelemetryReading, ForecastReport, HealthResponse, SimulationResponse, RiskZone } from './types/grid'
 import { fetchStats, fetchTelemetry, fetchForecast, fetchHealth } from './lib/api'
 import { MetricCards }      from './components/MetricCards'
 import { DigitalTwinTopology } from './components/DigitalTwinTopology'
 import { ForecastChart }    from './components/ForecastChart'
 import { GridCopilot }      from './components/GridCopilot'
+import { SimulationEngine } from './components/SimulationEngine'
 
 // ── Connection status type ────────────────────────────────────────────────────
 
@@ -40,6 +41,7 @@ export default function App() {
   const [lastUpdated, setLastUpdated]     = useState<Date | null>(null)
   const [connStatus, setConnStatus]       = useState<ConnectionStatus>('live')
   const [consecutiveErrors, setConsecutiveErrors] = useState(0)
+  const [currentSimulationOverride, setCurrentSimulationOverride] = useState<SimulationResponse | null>(null)
   const healthTickRef = useRef(0)
 
   // ── Core polling function ────────────────────────────────────────────────────
@@ -98,9 +100,104 @@ export default function App() {
 
   // ── Derived data for child components ─────────────────────────────────────────
 
-  const forecastMatrix = forecast?.outage_probability_matrix ?? []
-  const criticalCount  = forecast?.fleet_summary.critical_count ?? 0
-  const highCount      = forecast?.fleet_summary.high_risk_count ?? 0
+  // Parse simulated loss from simulated_loss_text, e.g. "₹1.2 Lakh"
+  const simulatedLoss = useMemo(() => {
+    if (!currentSimulationOverride) return 0;
+    const lossText = currentSimulationOverride.estimated_loss_text;
+    const matchLakh = lossText.match(/₹?([0-9\.]+)\s*Lakh/);
+    if (matchLakh) {
+      return parseFloat(matchLakh[1]) * 100_000;
+    }
+    const matchNum = lossText.match(/₹?([0-9\.,]+)/);
+    if (matchNum) {
+      return parseFloat(matchNum[1].replace(/,/g, ''));
+    }
+    return 4500.0;
+  }, [currentSimulationOverride]);
+
+  const displayStats = useMemo(() => {
+    if (!currentSimulationOverride) return stats;
+    return stats.map(s => {
+      if (currentSimulationOverride.affected_meter_ids.includes(s.meter_id)) {
+        return {
+          ...s,
+          avg_voltage: currentSimulationOverride.simulated_telemetry.voltage,
+          avg_current: currentSimulationOverride.simulated_telemetry.current,
+          avg_power_factor: currentSimulationOverride.simulated_telemetry.power_factor,
+        };
+      }
+      return s;
+    });
+  }, [stats, currentSimulationOverride]);
+
+  const displayTelemetry = useMemo(() => {
+    if (!currentSimulationOverride) return telemetry;
+    const portion = simulatedLoss / Math.max(1, currentSimulationOverride.affected_meter_ids.length);
+    return telemetry.map(t => {
+      if (currentSimulationOverride.affected_meter_ids.includes(t.meter_id)) {
+        return {
+          ...t,
+          is_anomalous: true,
+          voltage: currentSimulationOverride.simulated_telemetry.voltage,
+          current: currentSimulationOverride.simulated_telemetry.current,
+          power_factor: currentSimulationOverride.simulated_telemetry.power_factor,
+          revenue_loss_inr: portion,
+          outage_risk_score: currentSimulationOverride.failure_probability,
+          edge_flagged: true,
+          edge_confidence: 0.95,
+        };
+      }
+      return {
+        ...t,
+        is_anomalous: false,
+        revenue_loss_inr: 0,
+      };
+    });
+  }, [telemetry, currentSimulationOverride, simulatedLoss]);
+
+  const displayForecast = useMemo(() => {
+    if (!currentSimulationOverride || !forecast) return forecast;
+    const prob = currentSimulationOverride.failure_probability;
+    const isCritical = prob >= 70;
+    const isHigh = prob >= 50 && prob < 70;
+    const isMedium = prob >= 30 && prob < 50;
+    const isLow = prob < 30;
+
+    const affectedCount = currentSimulationOverride.affected_meter_ids.length;
+
+    return {
+      ...forecast,
+      fleet_summary: {
+        low_risk_count: isLow ? affectedCount : 0,
+        medium_risk_count: isMedium ? affectedCount : 0,
+        high_risk_count: isHigh ? affectedCount : 0,
+        critical_count: isCritical ? affectedCount : 0,
+        max_risk_score: prob,
+        avg_risk_score: prob,
+        systemic_outage_probability: prob / 100,
+      },
+      outage_probability_matrix: forecast.outage_probability_matrix.map(m => {
+        if (currentSimulationOverride.affected_meter_ids.includes(m.meter_id)) {
+          return {
+            ...m,
+            outage_risk_score: prob,
+            risk_zone: (isCritical ? 'critical' : isHigh ? 'high' : isMedium ? 'medium' : 'low') as RiskZone,
+            predicted_avg_w: currentSimulationOverride.simulated_telemetry.voltage * currentSimulationOverride.simulated_telemetry.current * currentSimulationOverride.simulated_telemetry.power_factor,
+            predicted_peak_w: currentSimulationOverride.simulated_telemetry.voltage * currentSimulationOverride.simulated_telemetry.current * currentSimulationOverride.simulated_telemetry.power_factor * 1.2,
+          };
+        }
+        return {
+          ...m,
+          outage_risk_score: 0,
+          risk_zone: 'low' as const,
+        };
+      })
+    } as ForecastReport;
+  }, [forecast, currentSimulationOverride]);
+
+  const forecastMatrix = displayForecast?.outage_probability_matrix ?? []
+  const criticalCount  = displayForecast?.fleet_summary.critical_count ?? 0
+  const highCount      = displayForecast?.fleet_summary.high_risk_count ?? 0
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
@@ -190,12 +287,38 @@ export default function App() {
         {/* ── Section: KPI Metric Cards ─────────────────────────────────────── */}
         <section aria-label="Key performance indicators">
           <MetricCards
-            stats={stats}
-            telemetry={telemetry}
-            forecast={forecast}
+            stats={displayStats}
+            telemetry={displayTelemetry}
+            forecast={displayForecast}
             isLoading={isLoading}
           />
         </section>
+
+        {/* ── Section: Simulation Control Panel ───────────────────────────── */}
+        <section aria-label="Simulation controls" className="animate-fade-in">
+          <SimulationEngine
+            onSimulationTriggered={(data) => setCurrentSimulationOverride(data)}
+            onResetSimulation={() => setCurrentSimulationOverride(null)}
+            activeScenario={currentSimulationOverride?.scenario ?? null}
+          />
+        </section>
+
+        {/* ── Section: AI Diagnosis Output Panel ──────────────────────────── */}
+        {currentSimulationOverride && (
+          <section className="animate-fade-in">
+            <div className="glass-card p-6 border-red-500/25 bg-red-950/5 relative overflow-hidden">
+              <div className="absolute top-0 right-0 px-3 py-1 bg-red-500/10 border-b border-l border-red-500/20 text-[9px] text-red-400 font-mono font-bold tracking-widest uppercase">
+                Active Simulation
+              </div>
+              <h3 className="text-xs font-semibold text-red-400 mb-4 uppercase tracking-wider font-mono">
+                AI Decision Support Review
+              </h3>
+              <div className="text-xs text-slate-300 font-mono whitespace-pre-wrap leading-relaxed">
+                {currentSimulationOverride.copilot_analysis}
+              </div>
+            </div>
+          </section>
+        )}
 
         {/* ── Section: Digital Twin Grid + Forecast Chart (side by side on xl) ── */}
         <section
@@ -231,9 +354,10 @@ export default function App() {
             </div>
 
             <DigitalTwinTopology
-              stats={stats}
-              telemetry={telemetry}
+              stats={displayStats}
+              telemetry={displayTelemetry}
               forecastItems={forecastMatrix}
+              simulationOverride={currentSimulationOverride}
             />
           </div>
 
@@ -341,7 +465,7 @@ export default function App() {
 
         {/* ── Section: Forecast Chart ──────────────────────────────────────────── */}
         <section aria-label="Predictive load forecast">
-          <ForecastChart telemetry={telemetry} forecast={forecast} />
+          <ForecastChart telemetry={displayTelemetry} forecast={displayForecast} />
         </section>
 
         {/* ── Footer ──────────────────────────────────────────────────────────── */}
