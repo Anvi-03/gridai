@@ -2,16 +2,12 @@
  * GridPulse AI — GridCopilot.tsx
  *
  * Floating terminal-style chat panel in the bottom-right corner.
- * Operators type natural-language queries → POST /api/v1/copilot/query
- * → streamed answer displayed in a dark monospace conversation thread.
- *
- * Error states:
- *   429 / 503  → "Rate limited or API key not configured" message
- *   Network    → "Could not reach copilot service" message
+ * Overhauled to present rich, visual, card-based diagnostics with action
+ * triggers, copy helper, severity highlights, and formatting boundaries.
  */
 
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Terminal, Send, X, Minimize2, Maximize2, Bot, User, AlertCircle } from 'lucide-react'
+import { Terminal, Send, X, Minimize2, Maximize2, Bot, User, AlertCircle, Copy, Check } from 'lucide-react'
 import { clsx } from 'clsx'
 import { postCopilotQuery } from '../lib/api'
 
@@ -33,6 +29,125 @@ const SUGGESTED_QUERIES = [
 
 let msgCounter = 0
 function nextId() { return `msg-${++msgCounter}` }
+
+// ── Rich diagnosis report formatter ──────────────────────────────────────────
+
+function RichMessage({ text, onCopy }: { text: string; onCopy: () => void }) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = () => {
+    onCopy()
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  if (!text.includes('### 🔍 Diagnosis Report')) {
+    return <p className="whitespace-pre-wrap break-words">{text}</p>
+  }
+
+  // Extract sections dynamically
+  const rootCauseMatch = text.match(/\*\*Root Cause\*\*\s*([\s\S]*?)(?=\*\*Estimated Loss\*\*|\*\*Recommendation\*\*|$)/)
+  const estimatedLossMatch = text.match(/\*\*Estimated Loss\*\*\s*([\s\S]*?)(?=\*\*Recommendation\*\*|$)/)
+  const recommendationMatch = text.match(/\*\*Recommendation\*\*\s*([\s\S]*?)$/)
+
+  const rootCauses = rootCauseMatch
+    ? rootCauseMatch[1]
+        .split('\n')
+        .map(l => l.replace(/^\s*\*\s*/, '').trim())
+        .filter(Boolean)
+    : []
+
+  const estimatedLosses = estimatedLossMatch
+    ? estimatedLossMatch[1]
+        .split('\n')
+        .map(l => l.replace(/^\s*\*\s*/, '').trim())
+        .filter(Boolean)
+    : []
+
+  const recommendations = recommendationMatch
+    ? recommendationMatch[1]
+        .split('\n')
+        .map(l => l.replace(/^\s*\*\s*/, '').trim())
+        .filter(Boolean)
+    : []
+
+  return (
+    <div className="space-y-3 font-sans text-xs text-left text-slate-200">
+      <div className="flex items-center justify-between border-b border-red-500/20 pb-2 mb-1">
+        <div className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-red-500 animate-blink" />
+          <span className="font-bold text-red-400 tracking-wider font-mono text-[10px]">DIAGNOSIS ENGINE</span>
+        </div>
+        <button
+          onClick={handleCopy}
+          className="text-slate-500 hover:text-slate-300 transition-colors p-1"
+          title="Copy raw markdown"
+        >
+          {copied ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
+        </button>
+      </div>
+
+      {rootCauses.length > 0 && (
+        <div className="space-y-1.5 bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/80">
+          <span className="font-semibold text-slate-500 block text-[9px] uppercase font-mono tracking-widest">Root Cause</span>
+          <ul className="space-y-1 list-none pl-0">
+            {rootCauses.map((rc, i) => {
+              const isProb = rc.toLowerCase().includes('probability')
+              return (
+                <li key={i} className="flex items-start gap-1.5 leading-snug">
+                  <span className={clsx("select-none mt-0.5", isProb ? "text-red-400 font-bold" : "text-slate-500")}>
+                    {isProb ? "⚠" : "•"}
+                  </span>
+                  <span className={clsx(isProb && "text-slate-100 font-semibold")}>{rc}</span>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      )}
+
+      {estimatedLosses.length > 0 && (
+        <div className="space-y-1.5 bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/80">
+          <span className="font-semibold text-slate-500 block text-[9px] uppercase font-mono tracking-widest">Estimated Loss</span>
+          <div className="text-red-400 font-bold font-mono text-sm leading-none py-0.5">
+            {estimatedLosses.join(', ').replace('**Financial Impact:**', '')}
+          </div>
+        </div>
+      )}
+
+      {recommendations.length > 0 && (
+        <div className="space-y-1.5 bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/80">
+          <span className="font-semibold text-slate-500 block text-[9px] uppercase font-mono tracking-widest">Action Interventions</span>
+          <ul className="space-y-1 list-none pl-0">
+            {recommendations.map((rec, i) => (
+              <li key={i} className="flex items-start gap-1.5 leading-snug">
+                <span className="text-emerald-400 select-none font-bold mt-0.5">✓</span>
+                <span>{rec}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="flex gap-2 pt-1 font-mono">
+        <button
+          onClick={() => alert('Operational Alert Acknowledged')}
+          className="px-2.5 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-all text-[9px]"
+        >
+          Acknowledge
+        </button>
+        <button
+          onClick={() => alert('Crew Despatched to Substation Location')}
+          className="px-2.5 py-1.5 rounded bg-red-600/25 hover:bg-red-600/40 text-red-300 border border-red-500/20 transition-all text-[9px]"
+        >
+          Dispatch Crew
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Main Component ───────────────────────────────────────────────────────────
 
 export function GridCopilot() {
   const [isOpen, setIsOpen]     = useState(false)
@@ -107,6 +222,10 @@ export function GridCopilot() {
       e.preventDefault()
       sendMessage(input)
     }
+  }
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text)
   }
 
   const panelWidth  = isExpanded ? 'w-[520px]'  : 'w-[380px]'
@@ -203,7 +322,7 @@ export function GridCopilot() {
                       : 'bg-slate-800/60 border border-slate-700/40 text-slate-200',
                   )}
                 >
-                  <p className="whitespace-pre-wrap break-words">{msg.text}</p>
+                  <RichMessage text={msg.text} onCopy={() => copyToClipboard(msg.text)} />
                   <div className="flex items-center gap-2 mt-1.5 opacity-40">
                     <span>
                       {msg.timestamp.toLocaleTimeString('en-IN', {

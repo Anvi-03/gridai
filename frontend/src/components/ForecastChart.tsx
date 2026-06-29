@@ -1,11 +1,13 @@
 /**
  * GridPulse AI — ForecastChart.tsx
  *
- * Recharts AreaChart that plots:
+ * Design: High-density interactive AreaChart plotting:
  *   • "Actual Load (W)"   — real power (V×I×PF) from recent telemetry readings
  *   • "24h Forecast (W)"  — fleet-average predicted_avg_w from the forecast API
  *
- * The chart is fully responsive and dark-themed to match the dashboard.
+ * Overhauled to Siemens / ABB monitoring dashboard grade:
+ *   - Enhanced tooltips with micro indicators.
+ *   - Custom grid shading and hover states.
  */
 
 import { useMemo } from 'react'
@@ -35,7 +37,6 @@ function buildChartData(
   telemetry: TelemetryReading[],
   forecast: ForecastReport | null,
 ): ChartPoint[] {
-  // Historical: last 20 readings sorted oldest→newest, real power per reading
   const historical: ChartPoint[] = [...telemetry]
     .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
     .slice(-20)
@@ -50,13 +51,11 @@ function buildChartData(
       risk: t.outage_risk_score ?? null,
     }))
 
-  // Forecast: project 4 steps into the future using fleet averages
   if (forecast && forecast.outage_probability_matrix.length > 0) {
     const matrix = forecast.outage_probability_matrix
     const avgNow  = matrix.reduce((s, m) => s + m.predicted_avg_w, 0) / matrix.length
     const avgPeak = matrix.reduce((s, m) => s + m.predicted_peak_w, 0) / matrix.length
 
-    // Bridge: last historical point also gets a forecast value
     if (historical.length > 0) {
       historical[historical.length - 1].forecast = Math.round(avgNow * 0.95)
     }
@@ -89,14 +88,14 @@ function buildChartData(
 function CustomTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null
   return (
-    <div className="bg-slate-900/95 border border-slate-700/60 rounded-xl p-3 text-xs shadow-2xl backdrop-blur-md">
-      <p className="text-slate-400 font-mono mb-2">{label}</p>
+    <div className="bg-slate-950/95 border border-slate-800/80 rounded-xl p-3 text-xs shadow-2xl backdrop-blur-md">
+      <p className="text-slate-500 font-mono mb-2 text-[10px] tracking-wider uppercase font-semibold">{label}</p>
       {payload.map((p: { color: string; name: string; value: number | null }) => (
         p.value != null && (
           <div key={p.name} className="flex items-center gap-2 mb-1">
-            <span className="w-2 h-2 rounded-full" style={{ background: p.color }} />
-            <span className="text-slate-400">{p.name}:</span>
-            <span className="text-slate-100 font-mono font-semibold">
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: p.color }} />
+            <span className="text-slate-400 font-mono text-[10px]">{p.name}:</span>
+            <span className="text-slate-100 font-mono font-bold">
               {formatWatts(p.value)}
             </span>
           </div>
@@ -114,29 +113,28 @@ export function ForecastChart({ telemetry, forecast }: ForecastChartProps) {
   const capacityW = forecast?.outage_probability_matrix[0]?.capacity_threshold_w ?? null
   const avgRisk   = forecast?.fleet_summary.avg_risk_score ?? null
 
-  // Find the bridge point (first point that has both actual and forecast)
   const bridgeIdx = data.findIndex(d => d.actual != null && d.forecast != null)
 
   return (
-    <div className="glass-card p-5 flex flex-col gap-4">
+    <div className="glass-card p-5 flex flex-col gap-4 border-slate-800/80">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <TrendingUp size={16} className="text-indigo-400" />
-          <h2 className="text-sm font-semibold text-slate-200">
+          <TrendingUp size={14} className="text-indigo-400" />
+          <h2 className="text-xs font-semibold text-slate-300 uppercase tracking-widest font-mono">
             Load Trajectory · 24h Predictive Forecast
           </h2>
         </div>
-        <div className="flex items-center gap-3 text-xs text-slate-500">
+        <div className="flex items-center gap-2 text-xs text-slate-500 font-mono">
           {avgRisk != null && (
             <span>
-              Fleet avg risk:{' '}
-              <span className="text-slate-300 font-mono">{avgRisk.toFixed(1)}/100</span>
+              Fleet Risk Avg:{' '}
+              <span className="text-slate-300 font-semibold">{avgRisk.toFixed(0)}%</span>
             </span>
           )}
-          <span className="text-slate-600">|</span>
-          <span className="font-mono text-slate-500 text-xs">
-            Ridge Regression + MAF
+          <span className="text-slate-700">|</span>
+          <span className="text-slate-500 text-[10px] font-semibold">
+            Ridge ML Regressor
           </span>
         </div>
       </div>
@@ -151,12 +149,10 @@ export function ForecastChart({ telemetry, forecast }: ForecastChartProps) {
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={data} margin={{ top: 4, right: 12, left: -8, bottom: 0 }}>
               <defs>
-                {/* Gradient for actual */}
                 <linearGradient id="gradActual" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%"  stopColor="#6366f1" stopOpacity={0.3} />
                   <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
                 </linearGradient>
-                {/* Gradient for forecast */}
                 <linearGradient id="gradForecast" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%"  stopColor="#06b6d4" stopOpacity={0.25} />
                   <stop offset="95%" stopColor="#06b6d4" stopOpacity={0} />
@@ -165,13 +161,13 @@ export function ForecastChart({ telemetry, forecast }: ForecastChartProps) {
 
               <CartesianGrid
                 strokeDasharray="3 3"
-                stroke="rgba(148,163,184,0.07)"
+                stroke="rgba(148,163,184,0.05)"
                 vertical={false}
               />
 
               <XAxis
                 dataKey="time"
-                tick={{ fill: '#64748b', fontSize: 10, fontFamily: 'monospace' }}
+                tick={{ fill: '#64748b', fontSize: 9, fontFamily: 'monospace' }}
                 tickLine={false}
                 axisLine={false}
                 interval="preserveStartEnd"
@@ -179,7 +175,7 @@ export function ForecastChart({ telemetry, forecast }: ForecastChartProps) {
 
               <YAxis
                 tickFormatter={v => formatWatts(v)}
-                tick={{ fill: '#64748b', fontSize: 10 }}
+                tick={{ fill: '#64748b', fontSize: 9, fontFamily: 'monospace' }}
                 tickLine={false}
                 axisLine={false}
                 width={56}
@@ -188,31 +184,30 @@ export function ForecastChart({ telemetry, forecast }: ForecastChartProps) {
               <Tooltip content={<CustomTooltip />} />
 
               <Legend
-                wrapperStyle={{ fontSize: 11, color: '#94a3b8', paddingTop: 8 }}
+                wrapperStyle={{ fontSize: 10, color: '#94a3b8', paddingTop: 8, fontFamily: 'monospace' }}
                 iconType="circle"
-                iconSize={8}
+                iconSize={6}
               />
 
-              {/* Capacity line */}
               {capacityW && (
                 <ReferenceLine
                   y={capacityW}
-                  stroke="rgba(239,68,68,0.4)"
+                  stroke="rgba(239,68,68,0.35)"
                   strokeDasharray="6 3"
                   label={{
-                    value: 'Capacity limit',
+                    value: 'Substation Capacity limit',
                     position: 'insideTopRight',
                     fill: '#f87171',
-                    fontSize: 9,
+                    fontSize: 8,
+                    fontFamily: 'monospace'
                   }}
                 />
               )}
 
-              {/* Bridge reference line between historical and forecast */}
               {bridgeIdx >= 0 && data[bridgeIdx] && (
                 <ReferenceLine
                   x={data[bridgeIdx].time}
-                  stroke="rgba(148,163,184,0.15)"
+                  stroke="rgba(148,163,184,0.12)"
                   strokeDasharray="4 4"
                 />
               )}
@@ -246,20 +241,20 @@ export function ForecastChart({ telemetry, forecast }: ForecastChartProps) {
         )}
       </div>
 
-      {/* Legend note */}
-      <div className="flex items-center gap-4 text-xs text-slate-600">
+      {/* Legend Note */}
+      <div className="flex items-center gap-4 text-[9px] text-slate-600 font-mono">
         <div className="flex items-center gap-1.5">
-          <span className="w-4 h-0.5 bg-indigo-500 rounded" />
-          <span>Historical (V×I×PF)</span>
+          <span className="w-3 h-0.5 bg-indigo-500 rounded" />
+          <span>Historical Load (V×I×PF)</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <span className="w-4 h-0.5 bg-cyan-400 rounded border-b border-dashed border-cyan-400" />
-          <span>Ridge Regression forecast (fleet avg)</span>
+          <span className="w-3 h-0.5 bg-cyan-400 rounded border-b border-dashed border-cyan-400" />
+          <span>Ridge Forecast</span>
         </div>
         {capacityW && (
           <div className="flex items-center gap-1.5">
-            <span className="w-4 h-0.5 bg-red-500/40 rounded" />
-            <span>Substation capacity</span>
+            <span className="w-3 h-0.5 bg-red-500/40 rounded" />
+            <span>Substation Capacity</span>
           </div>
         )}
       </div>
