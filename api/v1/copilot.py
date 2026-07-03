@@ -37,6 +37,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.v1.deps import get_current_user
 from database import get_db
 from services.context_retriever import get_context_retriever
 from services.copilot_engine import CopilotError, get_copilot
@@ -117,6 +118,7 @@ class CopilotHealthResponse(BaseModel):
 async def query_copilot(
     body: CopilotQueryRequest,
     db:   Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[str, Depends(get_current_user)],
 ) -> CopilotQueryResponse:
     """
     Orchestrate:

@@ -7,9 +7,11 @@ Exposes:
         telemetry, target transformer, affected meters, risk, and copilot review.
 """
 
-from typing import List, Dict
-from fastapi import APIRouter, HTTPException, status
+from typing import List, Dict, Annotated
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+
+from api.v1.deps import get_current_user
 
 router = APIRouter(
     prefix="/simulation",
@@ -149,9 +151,12 @@ SCENARIOS = {
     response_model=SimulationResponse,
     status_code=status.HTTP_200_OK,
     summary="Trigger a simulated grid scenario",
-    description="Returns simulated telemetry, target transformer, and affected meters for a selected scenario."
+    description="Returns simulated telemetry, target transformer, and affected meters for a selected scenario. Requires a valid JWT bearer token."
 )
-async def trigger_simulation(body: SimulationRequest) -> SimulationResponse:
+async def trigger_simulation(
+    body: SimulationRequest,
+    current_user: Annotated[str, Depends(get_current_user)],
+) -> SimulationResponse:
     scenario_key = body.scenario.lower().replace(" ", "_")
     if scenario_key not in SCENARIOS:
         raise HTTPException(

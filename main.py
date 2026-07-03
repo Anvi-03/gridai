@@ -43,6 +43,7 @@ from models import (
 from schemas import Base, TelemetryReading
 from services.analytics import get_analytics_service, schedule_analytics
 from services.forecasting_service import get_forecasting_service, schedule_forecast_sweep
+from api.v1.auth import router as auth_router
 from api.v1.copilot import router as copilot_router
 from api.v1.forecasting import router as forecasting_router
 from api.v1.simulation import router as simulation_router
@@ -134,6 +135,7 @@ app = FastAPI(
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 
+app.include_router(auth_router,        prefix=settings.API_PREFIX)
 app.include_router(copilot_router,     prefix=settings.API_PREFIX)
 app.include_router(forecasting_router, prefix=settings.API_PREFIX)
 app.include_router(simulation_router,  prefix=settings.API_PREFIX)

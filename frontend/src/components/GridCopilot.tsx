@@ -149,7 +149,7 @@ function RichMessage({ text, onCopy }: { text: string; onCopy: () => void }) {
 
 // ── Main Component ───────────────────────────────────────────────────────────
 
-export function GridCopilot() {
+export function GridCopilot({ onUnauthorized }: { onUnauthorized?: () => void }) {
   const [isOpen, setIsOpen]     = useState(false)
   const [isExpanded, setIsExpanded] = useState(false)
   const [messages, setMessages] = useState<Message[]>([
@@ -188,15 +188,29 @@ export function GridCopilot() {
     setInput('')
     setIsLoading(true)
 
-    const result = await postCopilotQuery(text.trim())
+    const { data: result, unauthorized } = await postCopilotQuery(text.trim())
     setIsLoading(false)
+
+    if (unauthorized) {
+      onUnauthorized?.()
+      setMessages(prev => [
+        ...prev,
+        {
+          id: nextId(),
+          role: 'error' as const,
+          text: 'Session expired. Please log in again.',
+          timestamp: new Date(),
+        },
+      ])
+      return
+    }
 
     if (result === null) {
       setMessages(prev => [
         ...prev,
         {
           id: nextId(),
-          role: 'error',
+          role: 'error' as const,
           text: 'Copilot is unavailable right now (rate limit or API key not configured). Please try again in a moment.',
           timestamp: new Date(),
         },
@@ -208,14 +222,14 @@ export function GridCopilot() {
       ...prev,
       {
         id: nextId(),
-        role: 'assistant',
+        role: 'assistant' as const,
         text: result.answer,
         timestamp: new Date(),
         model: result.model,
         tokens: (result.input_tokens ?? 0) + (result.output_tokens ?? 0),
       },
     ])
-  }, [isLoading])
+  }, [isLoading, onUnauthorized])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {

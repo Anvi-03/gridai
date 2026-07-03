@@ -258,21 +258,24 @@ async def run_phase4_stress_test() -> bool:
             text=True
         )
 
-        # Wait for server to start up
-        await asyncio.sleep(2.0)
-        
-        # Ping health check
+        # Wait for server to start up (up to 6 seconds with polling)
+        server_ready = False
         async with httpx.AsyncClient(base_url="http://127.0.0.1:8000") as client:
-            try:
-                health_resp = await client.get("/api/v1/health")
-                if health_resp.status_code == 200 and health_resp.json().get("status") == "healthy":
-                    print_success("FastAPI server is running and healthy.")
-                else:
-                    print_failure(f"Server health check failed: {health_resp.text}")
-                    return False
-            except Exception as e:
-                print_failure(f"Could not connect to FastAPI server on startup: {e}")
+            for attempt in range(12):
+                await asyncio.sleep(0.5)
+                try:
+                    health_resp = await client.get("/api/v1/health")
+                    if health_resp.status_code == 200 and health_resp.json().get("status") == "healthy":
+                        print_success(f"FastAPI server is running and healthy (started in {0.5 * (attempt + 1):.1f}s).")
+                        server_ready = True
+                        break
+                except Exception:
+                    pass
+            
+            if not server_ready:
+                print_failure("Could not connect to FastAPI server on startup after 6 seconds.")
                 return False
+
 
         # Run simulator as a subprocess with custom parameters:
         # 50 meters, 10 seconds duration (approx 20 rounds of 0.5s interval)

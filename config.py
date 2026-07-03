@@ -48,6 +48,13 @@ class Settings(BaseSettings):
     SIMULATOR_INTERVAL_S: float = 0.5   # seconds between each meter's burst
     SIMULATOR_BATCH_SIZE: int = 10      # readings per POST from each meter
 
+    # ── Authentication / JWT ──────────────────────────────────────────────────
+    # CRITICAL: Override JWT_SECRET_KEY in production with a long random string.
+    # Generate one with: python -c "import secrets; print(secrets.token_hex(32))"
+    JWT_SECRET_KEY: str = "gridpulse-dev-secret-change-in-production"
+    JWT_ALGORITHM:  str = "HS256"
+    JWT_EXPIRE_MINUTES: int = 60        # access token lifetime in minutes
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

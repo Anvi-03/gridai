@@ -142,3 +142,16 @@ export interface SimulationResponse {
   copilot_analysis: string;
 }
 
+// ── JWT Authentication (Feature 7) ────────────────────────────────────────────
+
+/** Returned by POST /api/v1/auth/login on success. */
+export interface AuthResponse {
+  access_token: string;
+  token_type:   string;  // always "bearer"
+}
+
+/** Returned by POST /api/v1/auth/register on success. */
+export interface RegisterResponse {
+  message:  string;
+  username: string;
+}

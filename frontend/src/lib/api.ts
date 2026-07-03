@@ -1,11 +1,22 @@
 /**
  * GridPulse AI — Centralized API client  (src/lib/api.ts)
  *
- * All fetch calls go through this module.  Every function:
- *   1. Hits the Vite-proxied /api path (no hardcoded localhost).
- *   2. Returns typed data on success.
- *   3. Returns a typed fallback value on ANY error (network, 429, 500, 502)
- *      so the dashboard never renders a blank white screen.
+ * All fetch calls go through this module.  Two fetch helpers are provided:
+ *
+ *   apiFetch<T>()      — Public endpoints (no auth header).
+ *                        Used for: telemetry, stats, forecast, health.
+ *                        Returns a typed fallback on ANY error so the
+ *                        dashboard never renders a blank white screen.
+ *
+ *   apiAuthFetch<T>()  — Protected endpoints (injects Bearer token).
+ *                        Used for: simulation/trigger, copilot/query.
+ *                        Returns null on 401 so callers can trigger logout.
+ *
+ * Token storage
+ * -------------
+ * The JWT is kept in localStorage under the key GRIDPULSE_TOKEN_KEY.
+ * Helper functions getToken(), setToken(), and logout() are exported so
+ * other modules never hard-code the key.
  */
 
 import type {
@@ -15,10 +26,40 @@ import type {
   CopilotResponse,
   HealthResponse,
   SimulationResponse,
+  AuthResponse,
+  RegisterResponse,
 } from '../types/grid'
 
-// ── Base fetch helper ─────────────────────────────────────────────────────────
+// ── Token storage helpers ─────────────────────────────────────────────────────
 
+const GRIDPULSE_TOKEN_KEY = 'gridpulse_token'
+
+/** Read the current JWT from localStorage (null if not authenticated). */
+export function getToken(): string | null {
+  return localStorage.getItem(GRIDPULSE_TOKEN_KEY)
+}
+
+/** Persist a new JWT to localStorage after a successful login. */
+export function setToken(token: string): void {
+  localStorage.setItem(GRIDPULSE_TOKEN_KEY, token)
+}
+
+/** Remove the JWT from localStorage — effectively logs the user out. */
+export function logout(): void {
+  localStorage.removeItem(GRIDPULSE_TOKEN_KEY)
+}
+
+/** True if a token is present (does not verify expiry client-side). */
+export function isAuthenticated(): boolean {
+  return getToken() !== null
+}
+
+// ── Base fetch helpers ────────────────────────────────────────────────────────
+
+/**
+ * Public fetch — no Authorization header.
+ * Absorbs all errors and returns null; callers swap in fallback data.
+ */
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T | null> {
   try {
     const res = await fetch(path, {
@@ -33,6 +74,49 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T | null> 
   } catch (err) {
     console.error(`[API] Network error on ${path}:`, err)
     return null
+  }
+}
+
+/**
+ * Protected fetch — automatically injects the stored JWT as a Bearer token.
+ *
+ * Returns null in two cases:
+ *  • HTTP 401 — token missing, expired, or rejected by the server.
+ *  • Any other network/server error.
+ *
+ * Callers should check for null and, if the original request was a 401,
+ * call logout() and redirect the user to the login screen.
+ */
+async function apiAuthFetch<T>(
+  path: string,
+  init?: RequestInit,
+): Promise<{ data: T | null; unauthorized: boolean }> {
+  const token = getToken()
+
+  try {
+    const res = await fetch(path, {
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(init?.headers ?? {}),
+      },
+    })
+
+    if (res.status === 401) {
+      console.warn(`[API] 401 Unauthorized on ${path} — token may be expired.`)
+      return { data: null, unauthorized: true }
+    }
+
+    if (!res.ok) {
+      console.warn(`[API] ${res.status} on ${path}`)
+      return { data: null, unauthorized: false }
+    }
+
+    return { data: (await res.json()) as T, unauthorized: false }
+  } catch (err) {
+    console.error(`[API] Network error on ${path}:`, err)
+    return { data: null, unauthorized: false }
   }
 }
 
@@ -138,30 +222,78 @@ export async function fetchHealth(): Promise<HealthResponse> {
   return data ?? FALLBACK_HEALTH
 }
 
+// ── Auth API functions ────────────────────────────────────────────────────────
+
 /**
- * GenAI Copilot query.
+ * Register a new operator account.
+ * POST /api/v1/auth/register  { username, password }
+ *
+ * Returns null on failure (e.g. 409 username taken); callers handle the error.
+ */
+export async function postRegister(
+  username: string,
+  password: string,
+): Promise<RegisterResponse | null> {
+  return apiFetch<RegisterResponse>('/api/v1/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  })
+}
+
+/**
+ * Log in with OAuth2 form-encoded credentials.
+ * POST /api/v1/auth/login  (application/x-www-form-urlencoded)
+ *
+ * Returns { access_token, token_type } on success, or null on failure.
+ * On success the caller should call setToken(data.access_token).
+ */
+export async function postLogin(
+  username: string,
+  password: string,
+): Promise<AuthResponse | null> {
+  try {
+    const body = new URLSearchParams({ username, password })
+    const res = await fetch('/api/v1/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+    })
+    if (!res.ok) return null
+    return (await res.json()) as AuthResponse
+  } catch {
+    return null
+  }
+}
+
+// ── Protected API functions ───────────────────────────────────────────────────
+
+/**
+ * GenAI Copilot query (PROTECTED — requires JWT).
  * POST /api/v1/copilot/query  { message: string }
  *
- * Returns null on 429 (rate limit) or 503 (key not configured) so the UI
- * can display a specific error message rather than crashing.
+ * Returns { data, unauthorized }.  When unauthorized=true the caller
+ * should log the user out and show the login modal.
  */
 export async function postCopilotQuery(
   message: string,
-): Promise<CopilotResponse | null> {
-  return apiFetch<CopilotResponse>('/api/v1/copilot/query', {
+): Promise<{ data: CopilotResponse | null; unauthorized: boolean }> {
+  return apiAuthFetch<CopilotResponse>('/api/v1/copilot/query', {
     method: 'POST',
     body: JSON.stringify({ message }),
   })
 }
 
 /**
- * Trigger scenario simulation.
+ * Trigger a scenario simulation (PROTECTED — requires JWT).
  * POST /api/v1/simulation/trigger  { scenario: string }
+ *
+ * Returns { data, unauthorized }.  When unauthorized=true the caller
+ * should log the user out and show the login modal.
  */
 export async function postTriggerSimulation(
   scenario: string,
-): Promise<SimulationResponse | null> {
-  return apiFetch<SimulationResponse>('/api/v1/simulation/trigger', {
+): Promise<{ data: SimulationResponse | null; unauthorized: boolean }> {
+  return apiAuthFetch<SimulationResponse>('/api/v1/simulation/trigger', {
     method: 'POST',
     body: JSON.stringify({ scenario }),
   })

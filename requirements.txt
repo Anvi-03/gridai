@@ -30,3 +30,8 @@ httpx                              # already listed above, also used in test cli
 
 # ── GenAI Copilot (Feature 4) ─────────────────────────────────────────────────
 google-genai>=2.10.0               # Google Gemini API SDK (async client)
+
+# ── Authentication (Feature 7 — JWT Security Layer) ──────────────────────────
+pyjwt>=2.9.0                       # JWT signing and verification (HS256)
+passlib[bcrypt]>=1.7.4             # bcrypt password hashing
+python-multipart>=0.0.9            # Required for OAuth2PasswordRequestForm (form data)

@@ -16,15 +16,16 @@
  */
 
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
-import { Activity, RefreshCw, Wifi, WifiOff, Zap } from 'lucide-react'
+import { Activity, RefreshCw, Wifi, WifiOff, Zap, LogOut } from 'lucide-react'
 import { clsx } from 'clsx'
 import type { StatsRow, TelemetryReading, ForecastReport, HealthResponse, SimulationResponse, RiskZone } from './types/grid'
-import { fetchStats, fetchTelemetry, fetchForecast, fetchHealth } from './lib/api'
+import { fetchStats, fetchTelemetry, fetchForecast, fetchHealth, isAuthenticated as checkToken, logout } from './lib/api'
 import { MetricCards }      from './components/MetricCards'
 import { DigitalTwinTopology } from './components/DigitalTwinTopology'
 import { ForecastChart }    from './components/ForecastChart'
 import { GridCopilot }      from './components/GridCopilot'
 import { SimulationEngine } from './components/SimulationEngine'
+import { LoginModal }       from './components/LoginModal'
 
 // ── Connection status type ────────────────────────────────────────────────────
 
@@ -43,6 +44,19 @@ export default function App() {
   const [consecutiveErrors, setConsecutiveErrors] = useState(0)
   const [currentSimulationOverride, setCurrentSimulationOverride] = useState<SimulationResponse | null>(null)
   const healthTickRef = useRef(0)
+
+  // ── Auth state (initialized from localStorage on mount) ──────────────────────
+  const [authenticated, setAuthenticated] = useState<boolean>(() => checkToken())
+
+  const handleAuthSuccess = (_token: string) => {
+    setAuthenticated(true)
+  }
+
+  const handleLogout = () => {
+    logout()
+    setAuthenticated(false)
+    setCurrentSimulationOverride(null)
+  }
 
   // ── Core polling function ────────────────────────────────────────────────────
 
@@ -267,6 +281,19 @@ export default function App() {
                 DB: {health.database}
               </span>
             )}
+
+            {/* Logout button — only shown when authenticated */}
+            {authenticated && (
+              <button
+                id="btn-logout"
+                onClick={handleLogout}
+                title="Sign out"
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border border-slate-700/50 text-slate-500 hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/5 transition-all duration-200"
+              >
+                <LogOut size={11} />
+                <span className="hidden sm:inline">Logout</span>
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -300,6 +327,7 @@ export default function App() {
             onSimulationTriggered={(data) => setCurrentSimulationOverride(data)}
             onResetSimulation={() => setCurrentSimulationOverride(null)}
             activeScenario={currentSimulationOverride?.scenario ?? null}
+            onUnauthorized={handleLogout}
           />
         </section>
 
@@ -479,7 +507,12 @@ export default function App() {
       </main>
 
       {/* ── Floating GenAI Copilot ───────────────────────────────────────────── */}
-      <GridCopilot />
+      <GridCopilot onUnauthorized={handleLogout} />
+
+      {/* ── Auth gate — renders over everything when not authenticated ────────── */}
+      {!authenticated && (
+        <LoginModal onAuthSuccess={handleAuthSuccess} />
+      )}
     </div>
   )
 }

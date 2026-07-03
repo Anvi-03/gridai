@@ -352,7 +352,7 @@ async def main() -> None:
         f"   Interval        : {INTERVAL_S} s\n"
         f"   Target          : {TARGET_URL}\n"
         f"   Anomaly inject  : ~{ANOMALY_INJECTION_RATE*100:.0f}% of readings\n"
-        f"   Edge screening  : Rolling Z-score (window=48, threshold=3σ)\n"
+        f"   Edge screening  : Rolling Z-score (window=48, threshold=3-sigma)\n"
         f"   Approx throughput: ~{int(NUM_METERS * BATCH_SIZE / INTERVAL_S)} readings/s\n"
         f"   Press Ctrl-C to stop.\n"
     )

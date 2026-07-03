@@ -16,6 +16,7 @@ interface SimulationEngineProps {
   onSimulationTriggered: (data: SimulationResponse) => void
   onResetSimulation: () => void
   activeScenario: string | null
+  onUnauthorized?: () => void
 }
 
 const SCENARIOS = [
@@ -30,15 +31,20 @@ export function SimulationEngine({
   onSimulationTriggered,
   onResetSimulation,
   activeScenario,
+  onUnauthorized,
 }: SimulationEngineProps) {
   const [loadingScenario, setLoadingScenario] = useState<string | null>(null)
 
   const handleTrigger = async (scenario: string) => {
     setLoadingScenario(scenario)
     try {
-      const response = await postTriggerSimulation(scenario)
-      if (response) {
-        onSimulationTriggered(response)
+      const { data, unauthorized } = await postTriggerSimulation(scenario)
+      if (unauthorized) {
+        onUnauthorized?.()
+        return
+      }
+      if (data) {
+        onSimulationTriggered(data)
       }
     } catch (error) {
       console.error('Failed to trigger simulation:', error)
