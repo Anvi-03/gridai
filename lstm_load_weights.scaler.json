@@ -1,0 +1,6 @@
+{
+  "mean_w": 757.8782920782493,
+  "std_w": 328.58811125300195,
+  "seq_len": 48,
+  "note": "Apply z-score normalisation before inference: (x - mean_w) / std_w"
+}

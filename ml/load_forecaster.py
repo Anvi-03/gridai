@@ -709,18 +709,37 @@ def get_forecaster() -> BaseForecaster:
     Return the module-level forecaster singleton.
 
     Selection logic (checked in order):
-      1. ENABLE_LSTM=true in environment → LSTMForecaster
-         (uses LSTM_WEIGHTS_PATH if set, else random weights for testing)
+      1. ENABLE_LSTM=true  → LSTMForecaster
+         Weights loaded from LSTM_WEIGHTS_PATH (relative to project root or
+         absolute).  Falls back to random weights with a warning if the file
+         is missing (safe for unit-test environments).
       2. ENABLE_GRID_FORECASTER=false explicitly → MovingAverageForecaster
       3. Default → GridForecaster (Feature 5 — Ridge + lagged features)
+
+    Configuration is read from config.Settings (validated by Pydantic), with
+    a direct os.getenv() fallback for contexts where config.py is unavailable
+    (e.g. standalone training scripts).
     """
     global _forecaster
     if _forecaster is not None:
         return _forecaster
 
-    enable_lstm            = os.getenv("ENABLE_LSTM",            "false").lower() == "true"
-    enable_grid_forecaster = os.getenv("ENABLE_GRID_FORECASTER", "true").lower()  == "true"
-    weights_path           = os.getenv("LSTM_WEIGHTS_PATH", "")
+    # Prefer validated config.Settings values; fall back to raw env vars.
+    try:
+        from config import settings as _cfg
+        enable_lstm            = _cfg.ENABLE_LSTM
+        enable_grid_forecaster = _cfg.ENABLE_GRID_FORECASTER
+        weights_path           = _cfg.LSTM_WEIGHTS_PATH
+    except Exception:
+        enable_lstm            = os.getenv("ENABLE_LSTM",            "false").lower() == "true"
+        enable_grid_forecaster = os.getenv("ENABLE_GRID_FORECASTER", "true").lower()  == "true"
+        weights_path           = os.getenv("LSTM_WEIGHTS_PATH", "")
+
+    logger.info(
+        "Forecaster config: ENABLE_LSTM=%s  ENABLE_GRID_FORECASTER=%s  "
+        "LSTM_WEIGHTS_PATH=%s",
+        enable_lstm, enable_grid_forecaster, weights_path or "<not set>",
+    )
 
     if enable_lstm:
         try:

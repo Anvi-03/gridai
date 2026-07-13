@@ -55,6 +55,18 @@ class Settings(BaseSettings):
     JWT_ALGORITHM:  str = "HS256"
     JWT_EXPIRE_MINUTES: int = 60        # access token lifetime in minutes
 
+    # ── ML Forecaster ────────────────────────────────────────────────────────
+    # Controls which load forecaster is selected by get_forecaster() in
+    # ml/load_forecaster.py at application startup.
+    #
+    # Priority order (highest → lowest):
+    #   1. ENABLE_LSTM=true  →  LSTMForecaster (PyTorch, weights from LSTM_WEIGHTS_PATH)
+    #   2. ENABLE_GRID_FORECASTER=true (default) →  GridForecaster (Ridge regression)
+    #   3. Fallback  →  MovingAverageForecaster (EMA, no dependencies)
+    ENABLE_LSTM: bool = False
+    LSTM_WEIGHTS_PATH: str = "lstm_load_weights.pth"   # relative to project root
+    ENABLE_GRID_FORECASTER: bool = True
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
