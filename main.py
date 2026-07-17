@@ -227,13 +227,14 @@ async def ingest_telemetry(
     # (non-edge) payloads — fully backward-compatible with pre-Feature-6 clients.
     orm_rows = [
         TelemetryReading(
-            meter_id        = r.meter_id,
-            timestamp       = r.timestamp or now_utc,
-            voltage         = r.voltage,
-            current         = r.current,
-            power_factor    = r.power_factor,
-            edge_flagged    = r.edge_flagged,
-            edge_confidence = r.edge_confidence,
+            meter_id                  = r.meter_id,
+            timestamp                 = r.timestamp or now_utc,
+            voltage                   = r.voltage,
+            current                   = r.current,
+            power_factor              = r.power_factor,
+            edge_flagged              = r.edge_flagged,
+            edge_confidence           = r.edge_confidence,
+            carbon_intensity_gco2_kwh = r.carbon_intensity_gco2_kwh,
         )
         for r in batch.readings
     ]

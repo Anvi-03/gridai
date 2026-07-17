@@ -81,6 +81,16 @@ VOLTAGE_MAX      = 250.0   # V  — clamp ceiling
 PF_MIN           =   0.88  # power factor lower bound (healthy residential)
 PF_MAX           =   0.95  # power factor upper bound
 
+# ───────────────────────────────────────────────────────────────────────
+# Carbon intensity constants (must match simulator.py)
+# ───────────────────────────────────────────────────────────────────────
+
+CI_BASE      = 475.0   # midpoint of [150, 800] gCO₂/kWh
+CI_AMPLITUDE = 325.0   # half-swing above/below midpoint
+CI_JITTER_SD =  15.0   # Gaussian noise sigma (gCO₂/kWh)
+CI_MIN       = 150.0   # absolute floor  (high solar penetration)
+CI_MAX       = 800.0   # absolute ceiling (coal/gas reliance)
+
 # Conversion: kWh over a measurement interval -> average Watts
 # For a 30-min interval:  W = kWh * (60 / 30) * 1000 = kWh * 2000
 # For a 60-min interval:  W = kWh * (60 / 60) * 1000 = kWh * 1000
@@ -166,6 +176,45 @@ def compute_current(
     current = np.where(watts > 0, watts / denominator, CURRENT_MIN)
     current = np.clip(current, CURRENT_MIN, CURRENT_MAX)
     return current
+
+
+def synthesise_carbon_intensity(
+    timestamps: pd.Series,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """
+    Generate grid carbon intensity values (gCO₂/kWh) aligned to the
+    provided UTC timestamp series using the same sinusoidal model as
+    simulator.py `_carbon_intensity_gco2_kwh()`.
+
+    Model
+    -----
+    CI(h) = CI_BASE + CI_AMPLITUDE * cos(2π * h / 24)
+
+    This produces:
+      • Maximum ~800 gCO₂/kWh at h=00 UTC (midnight → coal/gas heavy)
+      • Minimum ~150 gCO₂/kWh at h=12 UTC (solar peak)
+
+    Gaussian jitter (σ=CI_JITTER_SD) is added row-by-row for realism.
+
+    Parameters
+    ----------
+    timestamps : pd.Series
+        UTC-aware datetime series (from parse_timestamps).
+    rng : np.random.Generator
+        NumPy Generator used for reproducible Gaussian jitter.
+
+    Returns
+    -------
+    np.ndarray
+        Carbon intensity array (float64), same length as timestamps,
+        clamped to [CI_MIN, CI_MAX] and rounded to 2 decimal places.
+    """
+    hours = timestamps.dt.hour.to_numpy(dtype=np.float64)
+    base  = CI_BASE + CI_AMPLITUDE * np.cos(2 * np.pi * hours / 24)
+    noise = rng.normal(loc=0.0, scale=CI_JITTER_SD, size=len(hours))
+    raw   = base + noise
+    return np.round(np.clip(raw, CI_MIN, CI_MAX), 2)
 
 
 # ---------------------------------------------------------------------------
@@ -317,7 +366,8 @@ def build_telemetry(
     4. Synthesise voltage ~ Gaussian(230, 2), clamped [210, 250].
     5. Synthesise power_factor ~ Uniform(0.88, 0.95).
     6. Derive current = watts / (voltage * power_factor).
-    7. Assemble output DataFrame with GridPulse column schema.
+    7. Synthesise carbon_intensity_gco2_kwh from timestamp UTC hour.
+    8. Assemble output DataFrame with GridPulse column schema.
 
     Parameters
     ----------
@@ -351,12 +401,16 @@ def build_telemetry(
     # Step 6: Derive current
     current = compute_current(watts, voltage, power_factor)
 
-    # Step 7: Assemble output
+    # Step 7: Synthesise carbon intensity from time-of-day
+    carbon_intensity = synthesise_carbon_intensity(timestamps, rng)
+
+    # Step 8: Assemble output
     out = pd.DataFrame({
-        "timestamp":    timestamps.dt.strftime("%Y-%m-%dT%H:%M:%S+00:00"),
-        "voltage":      np.round(voltage,      4),
-        "current":      np.round(current,      4),
-        "power_factor": np.round(power_factor, 4),
+        "timestamp":                 timestamps.dt.strftime("%Y-%m-%dT%H:%M:%S+00:00"),
+        "voltage":                   np.round(voltage,          4),
+        "current":                   np.round(current,          4),
+        "power_factor":              np.round(power_factor,     4),
+        "carbon_intensity_gco2_kwh": carbon_intensity,
     })
 
     return out
@@ -472,6 +526,12 @@ def print_summary(out: pd.DataFrame) -> None:
     logger.info(
         "  Power Factor   : min=%.4f  max=%.4f  mean=%.4f",
         out["power_factor"].min(), out["power_factor"].max(), out["power_factor"].mean(),
+    )
+    logger.info(
+        "  Carbon Int.    : min=%.2f  max=%.2f  mean=%.2f  (gCO₂/kWh)",
+        out["carbon_intensity_gco2_kwh"].min(),
+        out["carbon_intensity_gco2_kwh"].max(),
+        out["carbon_intensity_gco2_kwh"].mean(),
     )
 
     # Derived real power -- sanity check that V*I*PF matches the original Watt scale
@@ -601,9 +661,13 @@ def main() -> None:
     out_path: Path = args.output
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    out[["timestamp", "voltage", "current", "power_factor"]].to_csv(
-        out_path, index=False
-    )
+    out[[
+        "timestamp",
+        "voltage",
+        "current",
+        "power_factor",
+        "carbon_intensity_gco2_kwh",
+    ]].to_csv(out_path, index=False)
 
     logger.info(
         "Output written: %d rows -> %s",

@@ -35,7 +35,7 @@ graph TD
         M2[Smart Meter 2] --> |Raw V, I, PF| E2[Local Filter: Rolling Z-Score]
     end
 
-    subgraph Cloud Backend (FastAPI)
+    subgraph Cloud Backend 
         E1 -.-> |HTTP POST Telemetry Batch| API[FastAPI Telemetry API]
         E2 -.-> |HTTP POST Telemetry Batch| API
         

@@ -87,6 +87,25 @@ STATS_INTERVAL_S = 5.0   # how often to print the live summary
 # so the edge-flag code path is exercised during every simulator run.
 ANOMALY_INJECTION_RATE = 0.125   # ~1 in 8 readings
 
+# ── Carbon intensity constants ───────────────────────────────────────────────────
+# The grid carbon intensity (gCO₂/kWh) is modelled as a smooth 24-hour
+# sinusoidal cycle anchored to two physical phenomena:
+#   • Daytime solar penetration (09:00–16:00 local)  →  low   carbon (~150–350)
+#   • Night-time coal/gas reliance (18:00–06:00 local) →  high  carbon (~550–800)
+# The function operates on UTC hour; callers that want local time must adjust.
+
+_CI_BASE      = 475.0   # midpoint of the [150, 800] range
+_CI_AMPLITUDE = 325.0   # half-swing above/below midpoint
+# Phase shift so the curve peaks at 00:00 UTC (grid most coal-reliant at midnight)
+# and troughs at 12:00 UTC (peak solar).  For IST (UTC+5:30) this maps to:
+#   peak   ≈ 00:00 UTC → 05:30 IST  (pre-dawn, coal heavy)
+#   trough ≈ 12:00 UTC → 17:30 IST  (afternoon solar peak)
+# Using UTC directly means the simulator is honest about when it is running.
+_CI_PHASE_RAD = 0.0     # cos(0) = 1 at midnight UTC → maximum carbon
+_CI_JITTER_SD =  15.0   # Gaussian noise (sigma) for reading-to-reading variation
+_CI_MIN       = 150.0   # absolute floor  (gCO₂/kWh)
+_CI_MAX       = 800.0   # absolute ceiling (gCO₂/kWh)
+
 
 # ── Statistics tracker ────────────────────────────────────────────────────────
 
@@ -148,7 +167,44 @@ class Stats:
 stats = Stats()
 
 
-# ── Realistic data generation ─────────────────────────────────────────────────
+# ── Realistic data generation ────────────────────────────────────────────────────
+
+
+def _carbon_intensity_gco2_kwh(utc_hour: int) -> float:
+    """
+    Compute a realistic grid carbon intensity value (gCO₂/kWh) for the given
+    UTC hour using a sinusoidal model anchored to the daily solar cycle.
+
+    Model
+    -----
+    CI(h) = BASE + AMPLITUDE * cos(2π * h / 24)
+
+    This produces:
+      • Maximum ~800 gCO₂/kWh at h=00 UTC (midnight → coal/gas heavy)
+      • Minimum ~150 gCO₂/kWh at h=12 UTC (solar peak)
+
+    For IST-based deployments (UTC+5:30) the trough aligns with ~17:30 IST
+    (afternoon solar peak) and the peak with ~05:30 IST (pre-dawn load).
+
+    Small Gaussian jitter (σ=15) is added to simulate real-world volatility
+    in grid dispatch scheduling.
+
+    Parameters
+    ----------
+    utc_hour : int
+        The current UTC hour in [0, 23].
+
+    Returns
+    -------
+    float
+        Carbon intensity clamped to [150.0, 800.0], rounded to 2 d.p.
+    """
+    # Smooth sinusoidal curve
+    raw = _CI_BASE + _CI_AMPLITUDE * math.cos(2 * math.pi * utc_hour / 24)
+    # Add realistic read-to-read jitter
+    raw += random.gauss(0.0, _CI_JITTER_SD)
+    # Clamp to physical bounds and round
+    return round(max(_CI_MIN, min(_CI_MAX, raw)), 2)
 
 def _generate_reading(meter_id: str, tick: int) -> dict:
     """
@@ -189,12 +245,17 @@ def _generate_reading(meter_id: str, tick: int) -> dict:
         4,
     )
 
+    # Carbon intensity: time-of-day sinusoidal model (see _carbon_intensity_gco2_kwh)
+    now_utc  = datetime.now(tz=timezone.utc)
+    ci_value = _carbon_intensity_gco2_kwh(now_utc.hour)
+
     return {
-        "meter_id":     meter_id,
-        "timestamp":    datetime.now(tz=timezone.utc).isoformat(),
-        "voltage":      voltage,
-        "current":      current,
-        "power_factor": power_factor,
+        "meter_id":                  meter_id,
+        "timestamp":                 now_utc.isoformat(),
+        "voltage":                   voltage,
+        "current":                   current,
+        "power_factor":              power_factor,
+        "carbon_intensity_gco2_kwh": ci_value,
     }
 
 
