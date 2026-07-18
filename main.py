@@ -12,6 +12,8 @@ Responsibilities:
   • GET  /api/v1/copilot/health       — copilot engine configuration check.
   • GET  /api/v1/grid/forecast        — 24-hour predictive outage forecast.
   • GET  /api/v1/grid/forecast/health — forecasting subsystem health check.
+  • GET  /api/v1/advisory             — Agentic Advisory Engine (load + carbon).
+  • GET  /api/v1/advisory/policy      — Microgrid policy tier configuration.
   • (Feature 6) Edge-enriched payloads accepted natively via edge_flagged /
     edge_confidence fields — priority analytics path for edge-flagged reads.
 
@@ -47,6 +49,7 @@ from api.v1.auth import router as auth_router
 from api.v1.copilot import router as copilot_router
 from api.v1.forecasting import router as forecasting_router
 from api.v1.simulation import router as simulation_router
+from api.v1.advisory import router as advisory_router
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -139,6 +142,7 @@ app.include_router(auth_router,        prefix=settings.API_PREFIX)
 app.include_router(copilot_router,     prefix=settings.API_PREFIX)
 app.include_router(forecasting_router, prefix=settings.API_PREFIX)
 app.include_router(simulation_router,  prefix=settings.API_PREFIX)
+app.include_router(advisory_router,    prefix=settings.API_PREFIX)
 
 
 # ── Middleware ─────────────────────────────────────────────────────────────────
